@@ -8,6 +8,7 @@ import { usePlaylistEditorManager } from "@/app/(main)/_features/playlists/lib/p
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { imageShimmer } from "@/components/shared/image-helpers"
 import { SeaImage } from "@/components/shared/sea-image"
+import { Badge } from "@/components/ui/badge"
 import { ContextMenuGroup, ContextMenuItem, ContextMenuLabel, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { cn } from "@/components/ui/core/styling"
 import { ProgressBar } from "@/components/ui/progress-bar"
@@ -263,8 +264,14 @@ export function EpisodeCard(props: EpisodeCardProps) {
                         {/*[CUSTOM UI] BOTTOM GRADIENT*/}
                         <EpisodeItemBottomGradient isSingleContainer={isSingleContainer} className="rounded-b-xl" />
 
-                        {!!badge && <div className="absolute left-2 top-2 z-[3]">
+                        {(!!badge || episode?.episodeMetadata?.isFiller) && <div className="absolute left-2 top-2 z-[3] flex flex-wrap items-center gap-2">
                             {badge}
+                            {episode?.episodeMetadata?.isFiller && <Badge
+                                data-episode-card-filler-badge
+                                className="font-semibold text-white bg-orange-800 !bg-opacity-100"
+                                intent="gray"
+                                size="lg"
+                            >Filler</Badge>}
                         </div>}
 
                         {isSingleContainer && (
