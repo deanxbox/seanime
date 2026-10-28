@@ -19,8 +19,10 @@ import { vc_pipManager } from "@/app/(main)/_features/video-core/video-core-pip"
 import { useVideoCorePlaylist } from "@/app/(main)/_features/video-core/video-core-playlist"
 import {
     vc_defaultKeybindings,
+    vc_eventCombo,
     vc_initialSettings,
     vc_keybindingsAtom,
+    vc_screenshotToClipboardAtom,
     vc_settings,
     vc_showStatsForNerdsAtom,
     vc_storedMutedAtom,
@@ -176,6 +178,8 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
     const [editedUseLibassRenderer, setEditedUseLibassRenderer] = useState(useLibassRenderer)
 
     const [recordingKey, setRecordingKey] = useState<string | null>(null)
+    const [screenshotToClipboard, setScreenshotToClipboard] = useAtom(vc_screenshotToClipboardAtom)
+    const [editedScreenshotToClipboard, setEditedScreenshotToClipboard] = useState(screenshotToClipboard)
 
     const [tab, setTab] = useState("keybinds")
     const { mutate: saveMediaPlayerSettings } = useSaveMediaPlayerSettings()
@@ -214,10 +218,11 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
             setEditedSubtitleDelay(settings.subtitleDelay ?? 0)
             setEditedUseLibassRenderer(useLibassRenderer)
             setEditedScreenshotDir(mediaPlayerSettings?.screenshotDir ?? "")
+            setEditedScreenshotToClipboard(screenshotToClipboard)
             setEditedSkipPatterns(preferences.skipPatterns)
             // setEditedSubCustomization(settings.subtitleCustomization || vc_initialSettings.subtitleCustomization)
         }
-    }, [open, keybindings, settings, useLibassRenderer, mediaPlayerSettings, preferences.skipPatterns])
+    }, [open, keybindings, settings, useLibassRenderer, mediaPlayerSettings, preferences.skipPatterns, screenshotToClipboard])
 
     const handleKeyRecord = (actionKey: keyof VideoCoreKeybindings) => {
         setRecordingKey(actionKey)
@@ -227,11 +232,17 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
             e.stopPropagation()
             e.stopImmediatePropagation()
 
+            // Wait for the actual key when only a modifier was pressed
+            if (/^(Control|Shift|Alt|Meta)(Left|Right)$/.test(e.code)) return
+
+            // Only undo/redo support modifier combos, the other shortcuts match on the bare key
+            const key = actionKey === "undo" || actionKey === "redo" ? vc_eventCombo(e) : e.code
+
             setEditedKeybindings(prev => ({
                 ...prev,
                 [actionKey]: {
                     ...prev[actionKey],
-                    key: e.code,
+                    key,
                 },
             }))
 
@@ -245,6 +256,7 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
     const handleSave = () => {
         if (skipPatternError) return
         setKeybindings(editedKeybindings)
+        setScreenshotToClipboard(editedScreenshotToClipboard)
         const newSettings = {
             ...settings,
             preferredSubtitleLanguage: editedSubLanguage,
@@ -280,6 +292,7 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
         setEditedSubsBlacklist(vc_initialSettings.preferredSubtitleBlacklist)
         setEditedSubtitleDelay(vc_initialSettings.subtitleDelay)
         setEditedUseLibassRenderer(true)
+        setEditedScreenshotToClipboard(true)
         setEditedScreenshotDir(mediaPlayerSettings?.screenshotDir ?? "")
         setEditedSkipPatterns(mediaCoreDefaultPreferences.skipPatterns)
         // setEditedSubCustomization(vc_initialSettings.subtitleCustomization)
@@ -296,7 +309,7 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
             "BracketLeft": "[", "BracketRight": "]",
             "Space": "⎵",
         }
-        return keyMap[keyCode] || keyCode
+        return keyCode.split("+").map(k => keyMap[k] || k).join("+")
     }
 
     function handleSaveTranslationSettings(data: z.infer<typeof translationSettingsSchema>) {
@@ -369,6 +382,12 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
                             label="Screenshot Directory"
                             help="Configure the directory where screenshots will be saved"
                             error={!isAbsolute ? "Must be an absolute path" : ""}
+                        />
+                        <Switch
+                            side="right"
+                            label="Copy screenshots to clipboard"
+                            value={editedScreenshotToClipboard}
+                            onValueChange={setEditedScreenshotToClipboard}
                         />
 
                         <div className="flex items-center justify-between pt-6">
@@ -555,6 +574,26 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
                                         action="Take Screenshot"
                                         description="Take screenshot"
                                         actionKey="takeScreenshot"
+                                        editedKeybindings={editedKeybindings}
+                                        setEditedKeybindings={setEditedKeybindings}
+                                        recordingKey={recordingKey}
+                                        handleKeyRecord={handleKeyRecord}
+                                        formatKeyDisplay={formatKeyDisplay}
+                                    />
+                                    <KeybindingRow
+                                        action="Undo"
+                                        description="Undo the last shortcut or playhead move"
+                                        actionKey="undo"
+                                        editedKeybindings={editedKeybindings}
+                                        setEditedKeybindings={setEditedKeybindings}
+                                        recordingKey={recordingKey}
+                                        handleKeyRecord={handleKeyRecord}
+                                        formatKeyDisplay={formatKeyDisplay}
+                                    />
+                                    <KeybindingRow
+                                        action="Redo"
+                                        description="Redo the last undone action"
+                                        actionKey="redo"
                                         editedKeybindings={editedKeybindings}
                                         setEditedKeybindings={setEditedKeybindings}
                                         recordingKey={recordingKey}
@@ -995,6 +1034,79 @@ export function VideoCoreKeybindingController(props: {
     const { takeScreenshot } = useVideoCoreScreenshot()
 
     //
+    // Undo / redo: playhead moves (any source) and mute/volume/speed shortcuts
+    //
+    type HistoryEntry = { type: "seek"; from: number; to: number; at: number } | { type: "fn"; undo: () => void; redo: () => void }
+    const history = useRef<HistoryEntry[]>([])
+    const cursor = useRef(0) // entries before the cursor are applied
+    const applyingSeek = useRef(false)
+
+    const pushHistory = (entry: HistoryEntry) => {
+        history.current.length = cursor.current
+        history.current.push(entry)
+        if (history.current.length > 100) history.current.shift()
+        cursor.current = history.current.length
+    }
+
+    const stepHistory = (dir: -1 | 1) => {
+        const entry = dir < 0 ? history.current[cursor.current - 1] : history.current[cursor.current]
+        if (!entry || !videoElement) {
+            showOverlayFeedback({ message: dir < 0 ? "Nothing to undo" : "Nothing to redo" })
+            return
+        }
+        cursor.current += dir
+        if (entry.type === "fn") {
+            dir < 0 ? entry.undo() : entry.redo()
+        } else {
+            const target = dir < 0 ? entry.from : entry.to
+            if (Math.abs(videoElement.currentTime - target) > 0.01) {
+                applyingSeek.current = true
+                setTimeout(() => applyingSeek.current = false, 1000)
+                videoElement.currentTime = target
+            }
+        }
+        showOverlayFeedback({ message: dir < 0 ? "Undo" : "Redo" })
+    }
+
+    useEffect(() => {
+        if (!videoElement) return
+        let lastTime = videoElement.currentTime
+        let pendingFrom: number | null = null
+        const onTime = () => {
+            if (!videoElement.seeking) lastTime = videoElement.currentTime
+        }
+        const onSeeking = () => {
+            if (!applyingSeek.current && pendingFrom === null) pendingFrom = lastTime
+        }
+        const onSeeked = () => {
+            const to = videoElement.currentTime
+            if (applyingSeek.current) {
+                applyingSeek.current = false
+            } else if (pendingFrom !== null && Math.abs(to - pendingFrom) > 0.01) {
+                const now = Date.now()
+                const top = history.current[history.current.length - 1]
+                // Merge rapid seeks (key repeat, scrubbing) into one entry
+                if (top?.type === "seek" && cursor.current === history.current.length && now - top.at < 600) {
+                    top.to = to
+                    top.at = now
+                } else {
+                    pushHistory({ type: "seek", from: pendingFrom, to, at: now })
+                }
+            }
+            pendingFrom = null
+            lastTime = to
+        }
+        videoElement.addEventListener("timeupdate", onTime)
+        videoElement.addEventListener("seeking", onSeeking)
+        videoElement.addEventListener("seeked", onSeeked)
+        return () => {
+            videoElement.removeEventListener("timeupdate", onTime)
+            videoElement.removeEventListener("seeking", onSeeking)
+            videoElement.removeEventListener("seeked", onSeeked)
+        }
+    }, [videoElement])
+
+    //
     // Keyboard shortcuts
     //
 
@@ -1018,6 +1130,15 @@ export function VideoCoreKeybindingController(props: {
                 setVolumeBoost(next)
                 showOverlayFeedback({ message: `Volume Boost: ${formatVolumeBoost(next)}` })
                 return
+            }
+
+            if (videoElement && active && !isMiniPlayer) {
+                const combo = vc_eventCombo(e)
+                if (combo === keybindings.undo.key || combo === keybindings.redo.key) {
+                    e.preventDefault()
+                    stepHistory(combo === keybindings.undo.key ? -1 : 1)
+                    return
+                }
             }
 
             // Ignore combinations with modifier keys
@@ -1158,13 +1279,16 @@ export function VideoCoreKeybindingController(props: {
             } else if (e.code === keybindings.volumeUp.key) {
                 e.preventDefault()
                 const newVolume = Math.min(1, volume + keybindings.volumeUp.value / 100)
+                pushHistory({ type: "fn", undo: () => setVolume(volume), redo: () => setVolume(newVolume) })
                 setVolume(newVolume)
             } else if (e.code === keybindings.volumeDown.key) {
                 e.preventDefault()
                 const newVolume = Math.max(0, volume - keybindings.volumeDown.value / 100)
+                pushHistory({ type: "fn", undo: () => setVolume(volume), redo: () => setVolume(newVolume) })
                 setVolume(newVolume)
             } else if (e.code === keybindings.mute.key) {
                 e.preventDefault()
+                pushHistory({ type: "fn", undo: () => setMuted(muted), redo: () => setMuted(!muted) })
                 setMuted(!muted)
             } else if (e.code === keybindings.cycleSubtitles.key) {
                 e.preventDefault()
@@ -1195,12 +1319,16 @@ export function VideoCoreKeybindingController(props: {
                 setShowStats(prev => !prev)
             } else if (e.code === keybindings.increaseSpeed.key) {
                 e.preventDefault()
-                const newRate = Math.min(8, video.playbackRate + keybindings.increaseSpeed.value)
+                const oldRate = video.playbackRate
+                const newRate = Math.min(8, oldRate + keybindings.increaseSpeed.value)
+                pushHistory({ type: "fn", undo: () => void (video.playbackRate = oldRate), redo: () => void (video.playbackRate = newRate) })
                 video.playbackRate = newRate
                 showOverlayFeedback({ message: `Speed: ${newRate.toFixed(2)}x` })
             } else if (e.code === keybindings.decreaseSpeed.key) {
                 e.preventDefault()
-                const newRate = Math.max(0.20, video.playbackRate - keybindings.decreaseSpeed.value)
+                const oldRate = video.playbackRate
+                const newRate = Math.max(0.20, oldRate - keybindings.decreaseSpeed.value)
+                pushHistory({ type: "fn", undo: () => void (video.playbackRate = oldRate), redo: () => void (video.playbackRate = newRate) })
                 video.playbackRate = newRate
                 showOverlayFeedback({ message: `Speed: ${newRate.toFixed(2)}x` })
             }

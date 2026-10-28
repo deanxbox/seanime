@@ -122,6 +122,8 @@ export interface VideoCoreKeybindings {
     takeScreenshot: { key: string }
     openInSight: { key: string }
     statsForNerds: { key: string }
+    undo: { key: string }
+    redo: { key: string }
 }
 
 export const vc_defaultKeybindings: VideoCoreKeybindings = {
@@ -145,7 +147,17 @@ export const vc_defaultKeybindings: VideoCoreKeybindings = {
     takeScreenshot: { key: "KeyI" },
     openInSight: { key: "KeyH" },
     statsForNerds: { key: "KeyZ" },
+    // Modifier combos use "Ctrl+Shift+KeyZ" format (see vc_eventCombo)
+    undo: { key: "Ctrl+KeyZ" },
+    redo: { key: "Ctrl+KeyY" },
 }
+
+/** Builds the combo string ("Ctrl+Alt+Shift+Code") for a keyboard event; Cmd counts as Ctrl. */
+export function vc_eventCombo(e: KeyboardEvent) {
+    return [(e.ctrlKey || e.metaKey) && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.code].filter(Boolean).join("+")
+}
+
+export const vc_screenshotToClipboardAtom = atomWithStorage("sea-video-core-screenshot-to-clipboard", true, undefined, { getOnInit: true })
 
 const vc_keybindingsRaw = atomWithStorage<Partial<VideoCoreKeybindings>>("sea-video-core-keybindings",
     vc_defaultKeybindings,

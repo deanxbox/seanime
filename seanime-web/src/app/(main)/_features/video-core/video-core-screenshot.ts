@@ -2,6 +2,7 @@ import { useVideoCoreSaveScreenshot } from "@/api/hooks/videocore.hooks"
 import { vc_subtitleManager } from "@/app/(main)/_features/video-core/video-core"
 import { vc_anime4kManager } from "@/app/(main)/_features/video-core/video-core"
 import { vc_videoElement } from "@/app/(main)/_features/video-core/video-core-atoms"
+import { vc_screenshotToClipboardAtom } from "@/app/(main)/_features/video-core/video-core.atoms"
 import { vc_showOverlayFeedback } from "@/app/(main)/_features/video-core/video-core-overlay-display"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { upath } from "@/lib/helpers/upath"
@@ -20,6 +21,7 @@ export function useVideoCoreScreenshot() {
     const showOverlayFeedback = useSetAtom(vc_showOverlayFeedback)
     const anime4kManager = useAtomValue(vc_anime4kManager)
     const anime4kOption = useAtomValue(vc_anime4kOption)
+    const copyToClipboard = useAtomValue(vc_screenshotToClipboardAtom)
 
     const serverStatus = useServerStatus()
     const { mutateAsync: saveScreenshotMutation } = useVideoCoreSaveScreenshot()
@@ -42,12 +44,13 @@ export function useVideoCoreScreenshot() {
     }
 
     async function saveScreenshot(blob: Blob, isAnime4K: boolean = false) {
-        // Copy to clipboard first
-        try {
-            await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
-        }
-        catch (e) {
-            console.error("Failed to copy screenshot to clipboard", e)
+        if (copyToClipboard) {
+            try {
+                await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+            }
+            catch (e) {
+                console.error("Failed to copy screenshot to clipboard", e)
+            }
         }
 
         const screenshotDir = serverStatus?.settings?.mediaPlayer?.screenshotDir
