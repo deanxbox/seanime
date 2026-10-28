@@ -9,6 +9,7 @@ import (
 	hibiketorrent "seanime/internal/extension/hibike/torrent"
 	torrentanalyzer "seanime/internal/torrents/analyzer"
 	"seanime/internal/util"
+	"slices"
 	"strconv"
 
 	"github.com/anacrolix/torrent"
@@ -18,6 +19,8 @@ import (
 const (
 	MaxTorrentCandidatesToCheck = 3
 	MaxAnalyzedTorrents         = 3
+	// MaxFallbackCandidates is how many extra candidates are tried after the top ones failed (auto-swap).
+	MaxFallbackCandidates = 6
 )
 
 func (s *AutoSelect) selectFile(
@@ -29,23 +32,33 @@ func (s *AutoSelect) selectFile(
 	torrentClient TorrentClient,
 	debridClient debrid.Provider,
 ) (*Result, error) {
-	// Go through the top torrents
-	limit := MaxTorrentCandidatesToCheck
-	if len(torrents) < limit {
-		limit = len(torrents)
-	}
+	// Go through the top torrents, then swap to further candidates (preferring other providers) if they all fail
+	maxAttempts := MaxAnalyzedTorrents + MaxFallbackCandidates
+	remaining := slices.Clone(torrents)
+	failedProviders := make(map[string]struct{})
+	attempts := 0
 
-	analyzedCount := 0
-
-	for i := 0; i < limit; i++ {
+	for len(remaining) > 0 && attempts < maxAttempts {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		t := torrents[i]
+		// past the top candidates, prefer a torrent from a provider that hasn't failed yet
+		pick := 0
+		if attempts >= MaxAnalyzedTorrents {
+			if i := slices.IndexFunc(remaining, func(c *hibiketorrent.AnimeTorrent) bool {
+				_, failed := failedProviders[c.Provider]
+				return !failed
+			}); i > 0 {
+				pick = i
+			}
+		}
+		t := remaining[pick]
+		remaining = slices.Delete(remaining, pick, pick+1)
 
-		if analyzedCount >= MaxAnalyzedTorrents {
-			break
+		if attempts >= MaxAnalyzedTorrents {
+			s.logger.Info().Str("provider", t.Provider).Msgf("autoselect: Previous candidates failed, swapping to fallback candidate: %s", t.Name)
+			s.log(fmt.Sprintf("Previous candidates failed, trying fallback: %s (%s)", t.Name, t.Provider))
 		}
 
 		s.logger.Debug().Msgf("autoselect: Checking torrent candidate: %s", t.Name)
@@ -90,9 +103,10 @@ func (s *AutoSelect) selectFile(
 			s.logger.Warn().Err(err).Msgf("autoselect: Could not select file for %s", t.Name)
 		}
 		s.updateCandidateStatus(ctx, t.Name, "skipped")
+		failedProviders[t.Provider] = struct{}{}
 
 		// Count the analysis attempt if we actually tried
-		analyzedCount++
+		attempts++
 	}
 
 	return nil, ErrNoFileFound

@@ -51,6 +51,24 @@ func (s *AutoSelect) search(ctx context.Context, media *anilist.CompleteAnime, e
 
 	// 3. Search concurrently from all providers
 	allTorrents, err := s.searchFromProviders(ctx, providers, media, episodeNumber, shouldSearchBatch, profile)
+	if err != nil || len(allTorrents) == 0 {
+		// Auto-swap: nothing usable from the selected providers, try the other installed ones one by one
+		for _, id := range s.torrentRepository.GetAllAnimeProviderExtensionIds() {
+			if slices.Contains(providers, id) {
+				continue
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			s.logger.Warn().Err(err).Str("swapTo", id).Msg("autoselect: No torrents from selected providers, swapping provider")
+			s.log(fmt.Sprintf("No torrents from %v, trying provider %s", providers, id))
+			swapped, swapErr := s.searchFromProviders(ctx, []string{id}, media, episodeNumber, shouldSearchBatch, profile)
+			if swapErr == nil && len(swapped) > 0 {
+				allTorrents, err = swapped, nil
+				break
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
