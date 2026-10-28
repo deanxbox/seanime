@@ -6,6 +6,8 @@
 
 <h1 align="center"><b>Seanime</b></h1>
 
+> **This is a fork of [Seanime](https://github.com/5rahim/seanime) developed by [deanxbox](https://github.com/deanxbox).** I maintain it to add my own features and fixes, so it may differ from upstream. Credit for the original project goes to [5rahim](https://github.com/5rahim).
+
 <p align="center">
 <img src="https://s3.seanime.app/sea/img-20260508-090529-ioc20pjr--sq2.webp" alt="preview" width="100%"/>
 </p>
