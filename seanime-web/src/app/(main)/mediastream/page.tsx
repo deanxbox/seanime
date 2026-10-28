@@ -5,6 +5,7 @@ import { useGetAnimeEntry } from "@/api/hooks/anime_entries.hooks"
 import { useGetMediastreamSettings, useMediastreamShutdownTranscodeStream, useRequestMediastreamMediaContainer } from "@/api/hooks/mediastream.hooks"
 import { EpisodeGridItem } from "@/app/(main)/_features/anime/_components/episode-grid-item"
 import { MediaEpisodeInfoModal } from "@/app/(main)/_features/media/_components/media-episode-info-modal"
+import { useSkipData } from "@/app/(main)/_features/video-core/_lib/aniskip"
 import { EpisodePillsGrid } from "@/app/(main)/_features/video-core/_components/episode-pills-grid"
 import { useIsCodecSupported } from "@/app/(main)/_features/video-core/_lib/hooks"
 import { VideoCore, VideoCoreProvider } from "@/app/(main)/_features/video-core/video-core"
@@ -87,6 +88,7 @@ function MediastreamPage() {
     }, [episodes, filePath])
 
     const episodeNumber = currentEpisode?.episodeNumber ?? 1
+    const { data: aniSkipData } = useSkipData(media?.idMal, currentEpisode?.progressNumber ?? -1)
     const progress = animeEntry?.listData?.progress ?? 0
 
     React.useEffect(() => {
@@ -359,6 +361,7 @@ function MediastreamPage() {
                                     id="mediastream"
                                     mRef={playerRef}
                                     state={state}
+                                    aniSkipData={aniSkipData}
                                     inline
                                     onError={onFatalError}
                                     onHlsFatalError={(e) => onFatalError(e)}

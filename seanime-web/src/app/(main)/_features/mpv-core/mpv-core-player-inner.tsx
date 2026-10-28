@@ -29,6 +29,7 @@ import { startVideoCoreMiniPlayerTransition } from "@/app/(main)/_features/video
 import { useVideoCoreInSight, vc_inSight_open, VideoCoreInSight } from "@/app/(main)/_features/video-core/video-core-in-sight"
 
 import { useVideoCorePlaylist, useVideoCorePlaylistSetup } from "@/app/(main)/_features/video-core/video-core-playlist"
+import { useSkipData } from "@/app/(main)/_features/video-core/_lib/aniskip"
 import { vc_formatTime } from "@/app/(main)/_features/video-core/video-core.utils"
 import { useWebsocketMessageListener, useWebsocketSender } from "@/app/(main)/_hooks/handle-websockets"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
@@ -237,7 +238,10 @@ function MpvCorePlayerContent(props: MpvCorePlayerContentProps) {
     const [buffered, setBuffered] = useAtom(mc_buffered)
     const [buffering, setBuffering] = useAtom(mc_buffering)
     const [tracks, setTracks] = useAtom(mc_tracks)
-    const [skipData, setSkipData] = useAtom(mc_skipData)
+    const [pluginSkipData, setSkipData] = useAtom(mc_skipData)
+    // AniSkip fallback when no plugin override is set
+    const { data: aniSkipData } = useSkipData(state.playbackInfo?.media?.idMal, state.playbackInfo?.episode?.progressNumber ?? -1)
+    const skipData = React.useMemo(() => pluginSkipData ?? (aniSkipData as Player_SkipData | undefined) ?? null, [pluginSkipData, aniSkipData])
     const [skipChapter, setSkipChapter] = React.useState<{
         end: number
         label: string
