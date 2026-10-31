@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/components/ui/core/styling"
 import { __isDesktop__ } from "@/types/constants"
 import React from "react"
@@ -49,6 +50,7 @@ export interface MediaCoreTopPlaybackInfoViewProps {
     animeTitle?: string
     episodeDisplayTitle?: string
     episodeTitle?: string
+    isFiller?: boolean
     onAnimeTitleClick?: () => void
     isMiniPlayer: boolean
     paused: boolean
@@ -60,6 +62,7 @@ export function MediaCoreTopPlaybackInfoView(props: MediaCoreTopPlaybackInfoView
         animeTitle,
         episodeDisplayTitle,
         episodeTitle,
+        isFiller,
         onAnimeTitleClick,
         isMiniPlayer,
         paused,
@@ -100,6 +103,11 @@ export function MediaCoreTopPlaybackInfoView(props: MediaCoreTopPlaybackInfoView
                     </p>
                 )}
             </div>
+            {isFiller && (
+                <Badge data-vc-element="top-playback-info-filler" className="mt-1 font-semibold text-white bg-orange-800 !bg-opacity-100" intent="gray">
+                    Filler
+                </Badge>
+            )}
         </div>
     )
 }

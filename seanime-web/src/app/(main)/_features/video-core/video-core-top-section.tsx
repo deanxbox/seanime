@@ -70,6 +70,7 @@ export function VideoCoreTopPlaybackInfo(props: { state: VideoCoreLifecycleState
             animeTitle={state.playbackInfo?.episode?.baseAnime?.title?.userPreferred}
             episodeDisplayTitle={displayTitle}
             episodeTitle={episodeTitle}
+            isFiller={state.playbackInfo?.episode?.episodeMetadata?.isFiller}
             onAnimeTitleClick={onAnimeTitleClick}
             isMiniPlayer={isMiniPlayer}
             paused={paused}

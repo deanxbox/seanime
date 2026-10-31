@@ -37,6 +37,7 @@ export function MpvCoreTopPlaybackInfo(props: {
             animeTitle={playbackInfo?.media?.title?.userPreferred || playbackInfo?.episode?.baseAnime?.title?.userPreferred}
             episodeDisplayTitle={displayTitle}
             episodeTitle={episodeTitle}
+            isFiller={playbackInfo?.episode?.episodeMetadata?.isFiller}
             onAnimeTitleClick={onAnimeTitleClick}
             isMiniPlayer={isMiniPlayer}
             paused={paused}
