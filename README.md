@@ -7,6 +7,12 @@
 <h1 align="center"><b>Seanime</b></h1>
 
 > **This is a fork of [Seanime](https://github.com/5rahim/seanime) developed by [deanxbox](https://github.com/deanxbox).** I maintain it to add my own features and fixes, so it may differ from upstream. Credit for the original project goes to [5rahim](https://github.com/5rahim).
+>
+> **Fork changes** (full list in [FORK_CHANGES.md](FORK_CHANGES.md)):
+> - Undo / Redo player shortcuts (Ctrl+Z / Ctrl+Y) with multi-key keybind support
+> - Auto-swap to another torrent or provider when one fails
+> - Skip OP/ED works across providers (AniSkip fallback)
+> - Filler badge in the player and an option to copy screenshots to the clipboard
 
 <p align="center">
 <img src="https://s3.seanime.app/sea/img-20260508-090529-ioc20pjr--sq2.webp" alt="preview" width="100%"/>
