@@ -1,13 +1,18 @@
 package realdebrid
 
 import (
+	"context"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"seanime/internal/debrid/debrid"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/samber/mo"
@@ -147,6 +152,91 @@ func TestFormRequestsPropagateAPIError(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not contain %q", err, want)
 				}
+			}
+		})
+	}
+}
+
+func TestQueryHTTPFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"blocked", 451, `{"error":"infringing_file","error_code":35}`, "infringing_file"},
+		{"blocked empty body", 451, "", "choose a different release"},
+		{"blocked HTML", 451, "<html>Unavailable</html>", "451"},
+		{"error without numeric code", 403, `{"error":"permission_denied"}`, "permission_denied"},
+		{"empty server error", 503, "", "503"},
+		{"HTML server error", 502, "<html>Bad gateway</html>", "502"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := newTestProvider(t, tc.status, tc.body)
+			_, err := p.addMagnet("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+			if errors.Is(err, errFileBlocked) != (tc.status == 451) {
+				t.Fatalf("blocked classification = %v, status = %d", err, tc.status)
+			}
+		})
+	}
+}
+
+func TestStreamLinkErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		blockedPath  string
+		transient    bool
+		wantRequests int32
+	}{
+		{"blocked torrent info", "/torrents/info/ABC", false, 1},
+		{"blocked download link", "/unrestrict/link", false, 2},
+		{"available file", "", false, 2},
+		{"temporary link error recovers", "", true, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests, linkRequests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if r.URL.Path == tc.blockedPath {
+					w.WriteHeader(http.StatusUnavailableForLegalReasons)
+					_, _ = io.WriteString(w, `{"error":"infringing_file","error_code":35}`)
+					return
+				}
+				switch r.URL.Path {
+				case "/torrents/info/ABC":
+					_, _ = io.WriteString(w, `{"id":"ABC","status":"downloaded","files":[{"id":1,"path":"/ep16.mkv","selected":1}],"links":["https://real-debrid.com/d/ABC"]}`)
+				case "/unrestrict/link":
+					if linkRequests.Add(1) == 1 && tc.transient {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						_, _ = io.WriteString(w, `{"error":"temporarily_unavailable","error_code":20}`)
+						return
+					}
+					_, _ = io.WriteString(w, `{"download":"https://example.com/ep16.mkv"}`)
+				default:
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+			logger := zerolog.Nop()
+			p := NewRealDebridT(&logger)
+			p.baseUrl = srv.URL
+			p.apiKey = mo.Some(testAPIKey)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			stream, err := p.GetTorrentStreamUrl(ctx, debrid.StreamTorrentOptions{ID: "ABC", FileId: "1"}, nil)
+			if tc.blockedPath != "" {
+				if !errors.Is(err, errFileBlocked) || stream != "" {
+					t.Fatalf("stream = %q, error = %v; want immediate blocked error", stream, err)
+				}
+			} else if err != nil || stream != "https://example.com/ep16.mkv" {
+				t.Fatalf("stream = %q, error = %v; want playable URL", stream, err)
+			}
+			if got := requests.Load(); got != tc.wantRequests {
+				t.Errorf("requests = %d, want %d", got, tc.wantRequests)
 			}
 		})
 	}

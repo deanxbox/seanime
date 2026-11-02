@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -20,6 +21,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/samber/mo"
 )
+
+var errFileBlocked = errors.New("Real-Debrid blocked this torrent or file; choose a different release")
 
 type (
 	RealDebrid struct {
@@ -134,25 +137,21 @@ func (t *RealDebrid) doQuery(method, uri string, body io.Reader, contentType str
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var errResp ErrorResponse
-
-		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-			t.logger.Error().Err(err).Msg("realdebrid: Failed to decode response")
-			return nil, fmt.Errorf("failed to decode response: %w", err)
-		}
-
-		// If the error details are empty, we'll just return the response body
-		if errResp.ErrorDetails == "" && errResp.ErrorCode == 0 {
-			content, _ := io.ReadAll(resp.Body)
-			return content, nil
-		}
-
-		return nil, fmt.Errorf("failed to query API: %s, %s", resp.Status, errResp.ErrorDetails)
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read API response (%s): %w", resp.Status, err)
 	}
 
-	content, _ := io.ReadAll(resp.Body)
-	//fmt.Println(string(content))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var errResp ErrorResponse
+		_ = json.Unmarshal(content, &errResp)
+		details := cmp.Or(errResp.ErrorDetails, errResp.Error, http.StatusText(resp.StatusCode))
+		if resp.StatusCode == http.StatusUnavailableForLegalReasons {
+			return nil, fmt.Errorf("%w (HTTP %s, %s, code %d)", errFileBlocked, resp.Status, details, errResp.ErrorCode)
+		}
+
+		return nil, fmt.Errorf("failed to query API: %s, %s (code %d)", resp.Status, details, errResp.ErrorCode)
+	}
 
 	return content, nil
 }
@@ -335,6 +334,9 @@ func (t *RealDebrid) GetTorrentStreamUrl(ctx context.Context, opts debrid.Stream
 		checkTorrentReady := func() (string, bool, bool, error) {
 			ti, _err := t.getTorrentInfo(opts.ID)
 			if _err != nil {
+				if errors.Is(_err, errFileBlocked) {
+					return "", false, false, _err
+				}
 				errRetries++
 				if errRetries >= 5 {
 					return "", false, false, fmt.Errorf("realdebrid: Failed to get torrent: %w", _err)
@@ -385,6 +387,9 @@ func (t *RealDebrid) GetTorrentStreamUrl(ctx context.Context, opts debrid.Stream
 						resp, _err := t.unrestrictLink(ti.Links[idx])
 						if _err != nil {
 							t.logger.Error().Err(_err).Msg("realdebrid: Failed to get download URL")
+							if errors.Is(_err, errFileBlocked) {
+								return "", true, false, _err
+							}
 							return "", true, false, nil
 						}
 
